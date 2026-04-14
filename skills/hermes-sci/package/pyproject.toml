@@ -29,6 +29,9 @@ full = [
     "anthropic>=0.30",
     "pymupdf4llm>=0.0.10",
 ]
+dev = [
+    "pytest>=7.4",
+]
 
 [project.scripts]
 hermes-sci = "hermes_sci.cli:main"
@@ -36,6 +39,11 @@ hermes-sci = "hermes_sci.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["hermes_sci*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra -q"
 
 [tool.setuptools.package-data]
 hermes_sci = [
