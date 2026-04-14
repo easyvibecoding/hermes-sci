@@ -86,6 +86,41 @@ def read_hermes_defaults() -> tuple[str, str]:
     return (model or FALLBACK_MODEL, provider or FALLBACK_PROVIDER)
 
 
+def _read_dotenv_key(name: str) -> str:
+    """Read a key from ~/.hermes/.env directly.
+
+    Needed when `hermes chat` sandboxes subprocess env (redacting real keys to
+    `***` placeholders). The .env file on disk still holds real values.
+    Supports plain `KEY=value`, `export KEY=value`, single/double quoted.
+    """
+    env_path = _hermes_home() / ".env"
+    if not env_path.exists():
+        return ""
+    prefixes = (f"{name}=", f"export {name}=")
+    try:
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            s = line.strip()
+            for pre in prefixes:
+                if s.startswith(pre):
+                    val = s[len(pre):].strip().strip("'\"")
+                    if val and val != "***":
+                        return val
+    except OSError:
+        pass
+    return ""
+
+
+def _resolve_api_key(key_var: str) -> str:
+    """Env var first, then ~/.hermes/.env fallback (bypasses hermes chat sandbox)."""
+    for src in (os.environ.get(key_var),
+                _read_dotenv_key(key_var),
+                os.environ.get("MINIMAX_API_KEY"),
+                _read_dotenv_key("MINIMAX_API_KEY")):
+        if src and src != "***":
+            return src
+    return ""
+
+
 def resolve_backend(
     backend: Backend = "minimax",
     model_override: Optional[str] = None,
@@ -95,15 +130,16 @@ def resolve_backend(
     model, provider = read_hermes_defaults()
     endpoint, key_var = PROVIDER_MAP.get(provider.lower(), PROVIDER_MAP["minimax"])
 
-    api_key = os.environ.get(key_var) or os.environ.get("MINIMAX_API_KEY", "")
+    api_key = _resolve_api_key(key_var)
     if not api_key:
         raise RuntimeError(
-            f"API key not found (tried ${key_var}, $MINIMAX_API_KEY). "
-            f"Set it in ~/.hermes/.env."
+            f"API key not found (tried ${key_var}, $MINIMAX_API_KEY, "
+            f"~/.hermes/.env). Set MINIMAX_API_KEY in ~/.hermes/.env."
         )
-    # If we had to fall back to MiniMax key because provider-specific was missing,
-    # also flip endpoint to MiniMax so the credentials match.
-    if not os.environ.get(key_var) and os.environ.get("MINIMAX_API_KEY"):
+    # If we fell back to MiniMax key because provider-specific was missing,
+    # flip endpoint to MiniMax so the credentials match.
+    provider_key_present = bool(os.environ.get(key_var) or _read_dotenv_key(key_var))
+    if not provider_key_present:
         endpoint = PROVIDER_MAP["minimax"][0]
         provider = "minimax"
 
