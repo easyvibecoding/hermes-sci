@@ -61,6 +61,22 @@ def test_triple_dollar_in_prose_drops_last():
     assert out.count("$") == 2  # one removed → even count restored
 
 
+def test_abstract_with_underscore_sanitized_by_writeup():
+    """Regression: ideas.json produces abstract text that bypasses the
+    per-section sanitize pipeline (it comes from ideation, not writeup).
+    write_paper must sanitize it explicitly before render_tex, otherwise
+    `perplexity_gap` etc. crashes pdflatex on page 1."""
+    from hermes_sci.sanitize import sanitize_latex
+    abstract = (
+        "We train on (input, perplexity_gap) pairs where perplexity_gap "
+        "measures draft-target discrepancy."
+    )
+    out = sanitize_latex(abstract)
+    # Both occurrences escaped.
+    assert out.count(r"perplexity\_gap") == 2
+    assert "perplexity_gap" not in out.replace(r"\_", "@")
+
+
 def test_dollar_inside_display_math_does_not_mask_prose_orphan():
     """A bare `$` in prose + a self-contained display-math block
     should still detect the prose `$` as orphan."""

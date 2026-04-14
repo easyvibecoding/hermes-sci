@@ -413,9 +413,16 @@ def write_paper(
                 log.info("inserted table labels in %s: %s", k, sorted(after - before))
         cleaned[k] = v2
 
+    # Abstract comes from idea metadata (ideation step), not from the
+    # per-section LLM pass, so it also bypasses the per-section sanitize
+    # pipeline. Run it through explicitly so prose specials like `_` or a
+    # truncated inline equation don't crash pdflatex before \section{} even
+    # starts.
+    abstract = _sanitize_latex(str(idea.get("Abstract") or ""))
+
     return Paper(
         title=str(idea.get("Title") or "Untitled Research"),
-        abstract=str(idea.get("Abstract") or ""),
+        abstract=abstract,
         sections=cleaned,
     )
 
