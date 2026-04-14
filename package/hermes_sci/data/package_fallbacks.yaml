@@ -1,0 +1,42 @@
+# hermes-sci package fallbacks — unwrap LLM-emitted LaTeX commands from
+# packages we deliberately do NOT include in the preamble (to keep the
+# template portable across TeX distributions).
+#
+# Contribute a new fallback by adding an entry. Shape:
+#   - name:        stable id for logs
+#     pattern:     regex matching the unwanted command (Python regex syntax)
+#     replacement: how to unwrap to plain text; \1 \2 for capture groups
+#     package:     the LaTeX package this command belongs to (docs only)
+#     flags:       optional list of re flags
+#     comment:     optional
+#
+# Each rule runs as a single re.sub() over the whole section body.
+
+fallbacks:
+  - name: siunitx_SI
+    pattern: '\\SI\{([^}]*)\}\{\\?([a-zA-Z]+)\}'
+    replacement: '\1 \2'
+    package: siunitx
+    comment: '\SI{16.3}{\second} → "16.3 second"'
+
+  - name: siunitx_num
+    pattern: '\\num\{([^}]*)\}'
+    replacement: '\1'
+    package: siunitx
+    comment: '\num{1000} → "1000"'
+
+  # ── Hallucinated macros LLMs invent as self-defined shortcuts ───
+  # Pattern: `\CapitalizedName` (no braces, no args) followed by space
+  # or word boundary. LLM thinks it defined it in a \newcommand earlier.
+  # We unwrap to plain text. Add new entries as they show up in logs.
+  - name: hallucinated_minimax
+    pattern: '\\MiniMax\b'
+    replacement: 'MiniMax-M2.7'
+    package: hallucinated
+    comment: 'MiniMax model name leaks as a macro'
+
+  - name: hallucinated_claude_p
+    pattern: '\\ClaudeP\b'
+    replacement: 'claude -p'
+    package: hallucinated
+    comment: 'CLI tool leaks as a macro'

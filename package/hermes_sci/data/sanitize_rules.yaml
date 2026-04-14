@@ -1,0 +1,61 @@
+# hermes-sci sanitize rules — community-editable regex rules.
+#
+# Each rule is a regex substitution applied to LLM-generated LaTeX.
+# Shape:
+#   - name:        stable id for logs
+#     pattern:     Python regex (single-quoted YAML to avoid backslash escape)
+#     replacement: sub pattern; \1 \2 for capture groups; empty string to delete
+#     flags:       optional list of re flags — DOTALL, MULTILINE, IGNORECASE
+#     comment:     optional, for human readers
+#
+# Groups are applied in pipeline order (see sanitize/pipeline.py).
+
+# ── Reasoning-model artefacts ──────────────────────────────────────
+# MiniMax-M2.7, DeepSeek-R1, qwq, Claude-thinking all leak these blocks.
+reasoning_artefacts:
+  - name: think_block
+    pattern: '<think>.*?(?:</think>|\Z)'
+    flags: [DOTALL, IGNORECASE]
+    replacement: ''
+    comment: '<think>...</think>' # MiniMax-M2.7, DeepSeek-R1
+  - name: reasoning_fence
+    pattern: '<\|(?:thinking|think|reasoning)\|>.*?<\|end\|>'
+    flags: [DOTALL]
+    replacement: ''
+    comment: '<|thinking|>...<|end|>'
+
+# ── Markdown code fences ───────────────────────────────────────────
+# LLMs wrap "their LaTeX answer" in ```latex ... ``` despite instructions.
+code_fences:
+  - name: strip_triple_backticks
+    pattern: '```(?:[a-z]*)?\n?(.*?)\n?```'
+    flags: [DOTALL]
+    replacement: '\1'
+
+# ── CJK leakage ────────────────────────────────────────────────────
+# MiniMax occasionally emits Chinese tokens mid-English prose. Range-based
+# so community can extend to Hangul / Hiragana / etc.
+cjk_ranges:
+  - '\u3000-\u9fff'   # CJK Unified Ideographs + symbols
+  - '\u3400-\u4dbf'   # CJK Extension A
+  - '\uff00-\uffef'   # Fullwidth forms
+
+# ── Disallowed commands ────────────────────────────────────────────
+# Commands that reference files on disk we don't have; delete outright.
+bad_commands:
+  - name: bad_input_include
+    pattern: '\\(?:input|include|includegraphics)\s*\{[^}]*\}'
+    replacement: ''
+
+# ── Markdown → LaTeX conversion ────────────────────────────────────
+markdown:
+  - name: md_bold
+    pattern: '\*\*(.+?)\*\*'
+    replacement: '\\textbf{\1}'
+  - name: md_italic
+    pattern: '(?<![\\*])\*(?!\*)(.+?)(?<!\*)\*(?!\*)'
+    replacement: '\\emph{\1}'
+  - name: md_heading
+    pattern: '^#{1,6}\s+(.+)$'
+    flags: [MULTILINE]
+    replacement: '\\subsection*{\1}'

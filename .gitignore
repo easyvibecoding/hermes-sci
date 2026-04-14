@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+build/
+dist/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Runtime artefacts
+*.log
+logs/
+paper.aux
+paper.bbl
+paper.blg
+paper.log
+paper.out
+paper.pdf
+paper.tex
+paper_meta.json
+verification_report.json
+ideas.json
+review.json
+
+# local env / secrets
+.env
+.env.*

@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-sci"
+version = "0.1.0"
+description = "Hermes-native AI Scientist — ideation, coding agent, experiment, writeup, review, all wired to Hermes' current LLM provider or claude -p subprocess"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "easyvibecoding" }]
+dependencies = [
+    "openai>=1.40",
+    "jinja2>=3.1",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Core extras. Install with: pip install 'hermes-sci[full]'
+novelty = ["requests>=2.31"]
+review = ["pypdf>=4.0"]
+hybrid = ["anthropic>=0.30"]
+pdf = ["pymupdf4llm>=0.0.10"]
+full = [
+    "requests>=2.31",
+    "pypdf>=4.0",
+    "anthropic>=0.30",
+    "pymupdf4llm>=0.0.10",
+]
+
+[project.scripts]
+hermes-sci = "hermes_sci.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hermes_sci*"]
+
+[tool.setuptools.package-data]
+hermes_sci = [
+    "latex/*.tex.j2", "latex/*.sty", "latex/*.bib",
+    "prompts/*.md", "prompts/*.json",
+    "data/*.yaml",
+]

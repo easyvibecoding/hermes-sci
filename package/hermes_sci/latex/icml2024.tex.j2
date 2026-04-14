@@ -1,0 +1,52 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage[numbers]{natbib}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+
+\title{ {{- title | e -}} }
+\author{hermes-sci Autonomous Research Agent}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+{{ abstract }}
+\end{abstract}
+
+\section{Introduction}
+{{ introduction }}
+
+\section{Related Work}
+{{ related_work }}
+
+\section{Method}
+{{ method }}
+
+\section{Experiments}
+{{ experiments }}
+
+{% if results %}
+\section{Results}
+{{ results }}
+{% endif %}
+
+\section{Discussion}
+{{ discussion }}
+
+\section{Conclusion}
+{{ conclusion }}
+
+{% if bibliography %}
+\bibliographystyle{plainnat}
+\bibliography{references}
+{% endif %}
+
+\end{document}
