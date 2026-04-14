@@ -60,9 +60,9 @@ skill reads `~/.hermes/config.yaml` to resolve the current provider
 ## Install
 
 ```bash
-pip install 'hermes-sci @ git+https://github.com/easyvibecoding/hermes-sci'
+pip install 'hermes-sci @ git+https://github.com/easyvibecoding/hermes-sci#subdirectory=skills/hermes-sci/package'
 # or editable from a local checkout:
-pip install -e ~/.hermes/my-skills/hermes-sci/package
+pip install -e ~/.hermes/skills/hermes-sci/package
 ```
 
 Requirements: `pdflatex` + `chktex` (TeX Live / MacTeX). The skill verifies
