@@ -72,6 +72,7 @@ class Table:
     caption: str
     headers: list[str]
     rows: list[list[str]]
+    owning_section: str = ""
 
     @classmethod
     def from_dict(cls, d: dict) -> "Table":
@@ -80,6 +81,7 @@ class Table:
             caption=str(d.get("caption", "")).strip(),
             headers=[str(h) for h in (d.get("headers") or [])],
             rows=[[str(c) for c in row] for row in (d.get("rows") or [])],
+            owning_section=str(d.get("owning_section", "")).strip(),
         )
 
 
@@ -114,9 +116,14 @@ class Results:
             out.extend(_scan_numbers(self.raw_log))
         return out
 
-    def to_prompt_context(self) -> str:
-        """Render as compact text for LLM prompt. Keeps specific numbers
-        verbatim so the writer can drop them into prose."""
+    def to_prompt_context(self, section_key: Optional[str] = None) -> str:
+        """Render as compact text for LLM prompt.
+
+        When `section_key` is set, tables with an `owning_section` that does
+        NOT match are rendered as reference-only stubs (label + caption)
+        instead of full pipe tables. This stops the LLM from happily
+        re-emitting the same `\\begin{table}` in every section.
+        """
         lines = ["EXPERIMENT RESULTS (author-supplied — use these exact numbers):", ""]
 
         # Verbatim string block — names/versions/hardware to be copied EXACTLY,
@@ -148,6 +155,17 @@ class Results:
                 lines.append(f"  - {meth}{m.name} = {m.value}{m.unit}{sp}{ctx}")
             lines.append("")
         if self.tables:
+            def _owns(t: Table) -> bool:
+                if not section_key:
+                    return True
+                if not t.owning_section:
+                    return True  # unassigned tables visible everywhere
+                return t.owning_section == section_key
+
+            own, other = [], []
+            for t in self.tables:
+                (own if _owns(t) else other).append(t)
+
             lines.append("Tables:")
             lines.append("  LaTeX labels to use: " +
                          ", ".join(f"tab:{t.id}" for t in self.tables))
@@ -155,7 +173,14 @@ class Results:
                          "\\label{tab:<id>} matching the ID below, and "
                          "cross-reference with Table~\\ref{tab:<id>}. "
                          "Never write 'Table ??' or a bare \\ref{}.")
-            for t in self.tables:
+            if section_key and other:
+                refs = ", ".join(f"tab:{t.id} (owned by {t.owning_section})"
+                                 for t in other)
+                lines.append(f"  REFERENCE-ONLY in this section "
+                             f"(already rendered elsewhere — use "
+                             f"Table~\\ref{{tab:<id>}} only, do NOT "
+                             f"re-emit \\begin{{table}}): {refs}")
+            for t in own:
                 lines.append("")
                 lines.append(f"  [\\label{{tab:{t.id}}}] {t.caption}")
                 lines.append(f"    | {' | '.join(t.headers)} |")

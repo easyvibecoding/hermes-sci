@@ -22,7 +22,7 @@ import re
 import shutil
 import subprocess
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -32,6 +32,7 @@ from .llm import acomplete, complete, recommended_concurrency, is_minimax_peak
 from .progress import Progress, ProgressCallback, emit, noop as _noop_progress
 from .results import Results, from_dict as results_from_dict, load as results_load
 from .sanitize import sanitize_latex as _sanitize_latex
+from .sanitize.tables import dedup_tables as _dedup_tables
 from .verify import audit as verify_audit, annotate_unverified
 
 log = logging.getLogger("hermes_sci.writeup")
@@ -178,13 +179,19 @@ class Paper:
     sections: dict[str, str]
 
 
-def _context(idea: dict, results_blob, hw_hint: str, bib_keys: set[str]) -> str:
-    """Assemble the shared prompt context.
+def _context(idea: dict, results_blob, hw_hint: str, bib_keys: set[str],
+             section_key: Optional[str] = None) -> str:
+    """Assemble the prompt context.
 
     `results_blob` may be:
       - None (no results; Phase 1 placeholder-style output)
       - str (free-form markdown; Phase 1 compat)
       - Results dataclass (Phase 3 structured — rendered with exact numbers)
+
+    `section_key` filters tables: each table with an `owning_section` is only
+    fully rendered when writing that section; otherwise it's listed as a
+    reference-only label. Prevents duplicate `\\begin{table}` blocks across
+    sections (the LLM happily re-emits tables it sees in its prompt).
     """
     parts = [
         "IDEA METADATA",
@@ -200,7 +207,7 @@ def _context(idea: dict, results_blob, hw_hint: str, bib_keys: set[str]) -> str:
         f"ALLOWED BIB KEYS (use only these): {sorted(bib_keys) or '(none)'}",
     ]
     if isinstance(results_blob, Results):
-        parts += ["", results_blob.to_prompt_context(),
+        parts += ["", results_blob.to_prompt_context(section_key=section_key),
                   "",
                   "STRICT: Only cite numbers that appear in the metrics or "
                   "tables above. Do NOT invent percentages, BLEU scores, "
@@ -215,11 +222,12 @@ def _context(idea: dict, results_blob, hw_hint: str, bib_keys: set[str]) -> str:
 
 
 async def _gen_section(
-    cfg: BackendConfig, key: str, context: str, model: Optional[str],
-    critique: bool,
+    cfg: BackendConfig, key: str, context_fn: Callable[[str], str],
+    model: Optional[str], critique: bool,
 ) -> tuple[str, str]:
     """Generate (optionally self-critiqued) LaTeX for one section."""
     instr = SECTION_PROMPTS[key]
+    context = context_fn(key)
     user = (
         f"{context}\n\nTASK: {instr}\n\n"
         f"Return ONLY the LaTeX body (no \\section header)."
@@ -250,7 +258,7 @@ async def _gen_section(
 
 
 async def _gen_all_sections(
-    cfg: BackendConfig, context: str, model: Optional[str],
+    cfg: BackendConfig, context_fn: Callable[[str], str], model: Optional[str],
     sections: list[str], critique: bool, parallel: bool,
     concurrency: Optional[int] = None,
     progress: ProgressCallback = _noop_progress,
@@ -273,7 +281,7 @@ async def _gen_all_sections(
         async def gated(key: str) -> tuple[str, str]:
             async with sem:
                 try:
-                    r = await _gen_section(cfg, key, context, model, critique)
+                    r = await _gen_section(cfg, key, context_fn, model, critique)
                     _emit_done(key, ok=True)
                     return r
                 except Exception:
@@ -286,7 +294,7 @@ async def _gen_all_sections(
         results = []
         for k in sections:
             try:
-                r = await _gen_section(cfg, k, context, model, critique)
+                r = await _gen_section(cfg, k, context_fn, model, critique)
                 results.append(r)
                 _emit_done(k, ok=True)
             except Exception as e:  # noqa: BLE001
@@ -350,12 +358,15 @@ def write_paper(
     sections = sections or list(SECTION_PROMPTS.keys())
     hw = hw or detect_hardware()
     allowed = _bib_keys(TEMPLATE_DIR / "references.bib")
-    ctx = _context(idea, results, hint_for_prompt(hw), allowed)
+    hw_hint = hint_for_prompt(hw)
+
+    def context_fn(section_key: str) -> str:
+        return _context(idea, results, hw_hint, allowed, section_key=section_key)
 
     log.info("generating %d sections (parallel=%s critique=%s) on hardware=%s peak=%s",
              len(sections), parallel, critique, hw.tier, is_minimax_peak())
     raw_sections = asyncio.run(
-        _gen_all_sections(cfg, ctx, model, sections, critique, parallel,
+        _gen_all_sections(cfg, context_fn, model, sections, critique, parallel,
                           concurrency=concurrency, progress=progress)
     )
 
@@ -367,10 +378,25 @@ def write_paper(
         emit(progress, Progress(kind="stage_end", stage="coherence",
                                 meta={"duration_s": time.time() - t_coh}))
 
-    # Collect table IDs from Results for label-recovery pass.
+    # Cross-section duplicate-table removal. Runs BEFORE citation / label
+    # fixing so the label-recovery pass doesn't attempt to re-label a block
+    # we're about to delete.
+    table_ownership: dict[str, str] = {}
     known_table_ids: set[str] = set()
     if isinstance(results, Results):
         known_table_ids = {t.id for t in results.tables}
+        for t in results.tables:
+            if t.owning_section:
+                table_ownership[f"tab:{t.id}"] = t.owning_section
+    raw_sections, dedup_events = _dedup_tables(
+        raw_sections, table_ownership=table_ownership,
+    )
+    for e in dedup_events:
+        emit(progress, Progress(kind="warning", stage="section",
+                                message=f"dedup {e.get('reason')}: "
+                                        f"{e.get('label') or '(no label)'} "
+                                        f"in {e.get('found_in')}",
+                                meta=e))
 
     # Strip citations whose keys aren't in the bib; ensure table labels.
     cleaned: dict[str, str] = {}
