@@ -1,0 +1,5 @@
+{
+  "metrics": [
+    {"name": "accuracy", "value": 0.823, "split": "test"}
+  ]
+}

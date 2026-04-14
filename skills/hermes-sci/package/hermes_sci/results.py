@@ -190,11 +190,59 @@ def _scan_numbers(obj) -> list[float]:
     return acc
 
 
+# ── Schema validation ────────────────────────────────────────────────
+
+_SCHEMA_PATH = pathlib.Path(__file__).parent / "data" / "results_schema.json"
+
+
+class ResultsSchemaError(ValueError):
+    """Raised when a results.json document fails schema validation.
+
+    `message` carries the jsonschema-produced description; `path` is the
+    slash-joined location of the offending node, e.g. `metrics/2/value`.
+    """
+
+    def __init__(self, message: str, path: str = ""):
+        super().__init__(f"results.json schema violation at {path!r}: {message}"
+                         if path else f"results.json schema violation: {message}")
+        self.path = path
+        self.message = message
+
+
+def validate(data: dict) -> None:
+    """Validate a results dict against the bundled JSON Schema.
+
+    Raises `ResultsSchemaError` on the first violation with the node path.
+    Imports `jsonschema` lazily so unit tests that don't touch schema can
+    run even if the optional library is absent.
+    """
+    try:
+        import jsonschema
+    except ImportError as e:  # pragma: no cover - core dep, shouldn't happen
+        raise RuntimeError("jsonschema is a core dependency; "
+                           "reinstall hermes-sci") from e
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    try:
+        jsonschema.validate(data, schema)
+    except jsonschema.ValidationError as e:
+        path = "/".join(str(p) for p in e.absolute_path)
+        raise ResultsSchemaError(e.message, path) from None
+
+
 # ── Loaders ──────────────────────────────────────────────────────────
 
 
-def load_json(path: pathlib.Path | str) -> Results:
+def load_json(path: pathlib.Path | str,
+              strict: bool = True) -> Results:
+    """Load + validate a JSON results file.
+
+    strict=True (default) runs JSON-Schema validation and raises
+    `ResultsSchemaError` on mismatch. Pass strict=False only for migration
+    of legacy files you know may be malformed.
+    """
     data = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    if strict:
+        validate(data)
     return from_dict(data)
 
 

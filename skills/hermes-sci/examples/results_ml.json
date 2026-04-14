@@ -1,0 +1,52 @@
+{
+  "setup": {
+    "hardware": "Apple M2 MPS 16 GB unified memory",
+    "os": "macOS 26",
+    "framework": "PyTorch 2.7",
+    "dataset": "CIFAR-100",
+    "model": "ResNet-50 with mixup augmentation",
+    "hyperparams": {
+      "lr": 0.001,
+      "batch_size": 256,
+      "epochs": 50,
+      "optimizer": "AdamW",
+      "weight_decay": 0.01,
+      "warmup_epochs": 2
+    }
+  },
+  "metrics": [
+    {"name": "top-1 accuracy", "value": 78.4, "unit": "%", "split": "test",  "method": "baseline"},
+    {"name": "top-5 accuracy", "value": 94.2, "unit": "%", "split": "test",  "method": "baseline"},
+    {"name": "top-1 accuracy", "value": 81.3, "unit": "%", "split": "test",  "method": "ours"},
+    {"name": "top-5 accuracy", "value": 95.7, "unit": "%", "split": "test",  "method": "ours"},
+    {"name": "parameters",    "value": 25.6, "unit": "M"},
+    {"name": "training time", "value": 142,  "unit": "min"},
+    {"name": "peak memory",   "value": 9.1,  "unit": "GB"}
+  ],
+  "tables": [
+    {
+      "id": "main_results",
+      "caption": "Top-1 and Top-5 accuracy on CIFAR-100 test set.",
+      "owning_section": "results",
+      "headers": ["Method", "Top-1 (%)", "Top-5 (%)", "Params (M)"],
+      "rows": [
+        ["Baseline ResNet-50",       "78.4", "94.2", "25.6"],
+        ["+ mixup (ours)",           "81.3", "95.7", "25.6"],
+        ["+ mixup + cosine schedule", "82.1", "96.0", "25.6"]
+      ]
+    },
+    {
+      "id": "ablation",
+      "caption": "Ablation study: effect of each component on test accuracy.",
+      "owning_section": "experiments",
+      "headers": ["Configuration", "Top-1 (%)", "Delta"],
+      "rows": [
+        ["Full",                  "81.3", "-"],
+        ["-- mixup",              "78.4", "-2.9"],
+        ["-- warmup",             "80.1", "-1.2"],
+        ["-- weight decay",       "79.6", "-1.7"]
+      ]
+    }
+  ],
+  "raw_log": "Trained for 50 epochs. Peak validation accuracy 81.4% reached at epoch 47. Training converged cleanly with no loss spikes."
+}

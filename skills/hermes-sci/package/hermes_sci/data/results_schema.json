@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/easyvibecoding/hermes-sci/schemas/results.json",
+  "title": "hermes-sci results.json",
+  "description": "Author-supplied experiment results. All numeric claims in the generated paper are audited against this registry.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "setup": {
+      "description": "Verbatim strings (hardware / framework / dataset / model / OS / versions) that must appear exactly as written in the paper. hyperparams is a nested dict of scalar values.",
+      "type": "object",
+      "properties": {
+        "hardware": {"type": "string"},
+        "os": {"type": "string"},
+        "framework": {"type": "string"},
+        "dataset": {"type": "string"},
+        "model": {"type": "string"},
+        "hyperparams": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["string", "number", "integer", "boolean", "null"]
+          }
+        }
+      },
+      "additionalProperties": {
+        "type": ["string", "number", "integer", "boolean", "null", "object", "array"]
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["name", "value"],
+        "additionalProperties": false,
+        "properties": {
+          "name":    {"type": "string", "minLength": 1},
+          "value":   {"type": "number"},
+          "unit":    {"type": "string"},
+          "method":  {"type": "string"},
+          "split":   {"type": "string", "description": "e.g. train | val | test"},
+          "context": {"type": "string", "description": "free-form qualifier, e.g. 'simple bucket'"}
+        }
+      }
+    },
+    "tables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "headers", "rows"],
+        "additionalProperties": false,
+        "properties": {
+          "id":      {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                      "description": "becomes LaTeX label tab:<id>"},
+          "caption": {"type": "string"},
+          "headers": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "rows": {
+            "type": "array",
+            "items": {"type": "array", "items": {"type": ["string", "number"]}}
+          },
+          "owning_section": {
+            "type": "string",
+            "enum": ["introduction", "related_work", "method", "experiments",
+                     "results", "discussion", "conclusion"],
+            "description": "Only this section renders the table; others must \\ref{tab:<id>}. Reserved for future de-duplication pass."
+          }
+        }
+      }
+    },
+    "raw_log": {
+      "type": "string",
+      "description": "Optional stdout/stderr dump. Scanned for numeric claims."
+    }
+  },
+  "required": ["metrics"]
+}

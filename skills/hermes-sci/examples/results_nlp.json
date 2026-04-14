@@ -1,0 +1,38 @@
+{
+  "setup": {
+    "hardware": "1x A100 40 GB",
+    "framework": "PyTorch 2.7 + transformers 4.42",
+    "dataset": "WMT14 En-De",
+    "model": "Transformer-base 65M params",
+    "hyperparams": {
+      "lr": 0.0007,
+      "batch_size": 4096,
+      "max_steps": 100000,
+      "warmup_steps": 4000,
+      "dropout": 0.1,
+      "label_smoothing": 0.1
+    }
+  },
+  "metrics": [
+    {"name": "BLEU",       "value": 27.3, "split": "test",    "method": "baseline"},
+    {"name": "BLEU",       "value": 28.6, "split": "test",    "method": "ours",    "context": "beam=4"},
+    {"name": "BLEU",       "value": 28.9, "split": "test",    "method": "ours",    "context": "beam=8"},
+    {"name": "COMET",      "value": 82.4, "split": "test",    "method": "ours"},
+    {"name": "inference latency", "value": 142, "unit": "ms", "method": "baseline"},
+    {"name": "inference latency", "value": 138, "unit": "ms", "method": "ours"},
+    {"name": "tokens/sec", "value": 4820, "method": "ours",   "context": "batch=1 greedy"}
+  ],
+  "tables": [
+    {
+      "id": "translation_quality",
+      "caption": "Translation quality on WMT14 En-De test set. Higher is better.",
+      "owning_section": "results",
+      "headers": ["System", "BLEU", "COMET", "beam"],
+      "rows": [
+        ["Baseline Transformer", "27.3", "80.1", "4"],
+        ["Ours (beam=4)",        "28.6", "82.4", "4"],
+        ["Ours (beam=8)",        "28.9", "82.7", "8"]
+      ]
+    }
+  ]
+}

@@ -17,7 +17,11 @@ from typing import Any, Optional
 from .config import Backend, apply_env, resolve_backend
 from .ideation import ideate as ideate_fn, save_ideas
 from .orchestrator import run_pipeline
-from .results import load as results_load
+from .results import (
+    ResultsSchemaError,
+    load as results_load,
+    validate as results_validate,
+)
 from .review import review as review_fn, save_review
 from .writeup import writeup as writeup_fn
 
@@ -85,6 +89,29 @@ def cmd_writeup(args) -> int:
     )
     print(json.dumps(r, indent=2, ensure_ascii=False))
     return 0 if r.get("pdf") or args.skip_compile else 1
+
+
+def cmd_validate_results(args) -> int:
+    """Schema-check a results.json. Exits 0 if valid, 1 otherwise."""
+    path = pathlib.Path(args.path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as e:
+        print(f"❌ cannot read {path}: {e}", file=sys.stderr)
+        return 2
+    except json.JSONDecodeError as e:
+        print(f"❌ {path}: invalid JSON at line {e.lineno} col {e.colno}: {e.msg}",
+              file=sys.stderr)
+        return 1
+    try:
+        results_validate(data)
+    except ResultsSchemaError as e:
+        print(f"❌ {path}: {e}", file=sys.stderr)
+        return 1
+    print(f"✅ {path} matches results.json schema "
+          f"(metrics={len(data.get('metrics', []))}, "
+          f"tables={len(data.get('tables', []))})")
+    return 0
 
 
 def cmd_review(args) -> int:
@@ -161,6 +188,11 @@ def build_parser() -> argparse.ArgumentParser:
                          "MiniMax peak 15:00-17:30 Asia/Shanghai, 7 off-peak)")
     pw.add_argument("-o", "--output", required=True, help="output directory")
     pw.set_defaults(func=cmd_writeup)
+
+    pv = sub.add_parser("validate-results",
+                        help="schema-check a results.json without running the pipeline")
+    pv.add_argument("path", help="path to results.json")
+    pv.set_defaults(func=cmd_validate_results)
 
     pr = sub.add_parser("review", help="peer-review a paper PDF")
     _add_common(pr)
