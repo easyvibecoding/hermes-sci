@@ -12,7 +12,7 @@ with a ~700-line Python package.
 ## Install
 
 ```bash
-pip install -e ~/.hermes/my-skills/ai-scientist
+pip install -e ~/.hermes/my-skills/hermes-sci/package
 ```
 
 Dependencies: `openai>=1.40`, `jinja2`, `requests`, `pypdf`, `pyyaml`.
