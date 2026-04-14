@@ -9,7 +9,9 @@ Order matters:
   5. markdown → LaTeX (bold / italic / heading)
   6. strip bad \\input \\include
   7. wrap lonely \\item
-  8. escape prose specials (%, &, <, >) — runs last so earlier passes'
+  8. balance inline math — drop orphan `$` from truncated LLM output
+     BEFORE the escape pass, whose math-segment scanner assumes balanced `$`
+  9. escape prose specials (%, &, <, >, _) — runs last so earlier passes'
      output is also escaped
 
 To add a pass: write a module with a `str → str` function, append to
@@ -26,6 +28,7 @@ from .escape import escape_prose_specials
 from .fences import strip_code_fences
 from .items import wrap_lonely_items
 from .markdown import md_to_latex
+from .math_balance import balance_inline_math
 from .packages import apply_package_fallbacks
 from .reasoning import strip_reasoning
 
@@ -39,6 +42,7 @@ SANITIZE_PIPELINE: list[Pass] = [
     md_to_latex,
     strip_bad_commands,
     wrap_lonely_items,
+    balance_inline_math,
     escape_prose_specials,
 ]
 

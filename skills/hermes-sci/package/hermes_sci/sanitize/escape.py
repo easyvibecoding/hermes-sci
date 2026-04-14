@@ -41,6 +41,10 @@ _BARE_PERCENT = re.compile(r"(?<!\\)%")
 _BARE_LT = re.compile(r"(?<![\\$])<(?!=)(?=\s|\d|[A-Za-z])")
 _BARE_GT = re.compile(r"(?<![\\$])>(?!=)(?=\s|\d|[A-Za-z])")
 _BARE_AMP = re.compile(r"(?<!\\)&(?![A-Za-z]{2,6};)")
+# Prose underscores: `epsilon_target`, `file_name` → must be \_ or LaTeX tries
+# to open a subscript (which only works in math mode). Skip `\_` (already
+# escaped) and `_{...}` (common math-like usage the LLM forgot to wrap in $).
+_BARE_UNDERSCORE = re.compile(r"(?<!\\)_(?!\{)")
 
 
 def _unescape_table_amps(s: str) -> str:
@@ -55,6 +59,7 @@ def _escape_chunk(prose: str) -> str:
     prose = _BARE_AMP.sub(r"\\&", prose)
     prose = _BARE_LT.sub(r"$<$", prose)
     prose = _BARE_GT.sub(r"$>$", prose)
+    prose = _BARE_UNDERSCORE.sub(r"\\_", prose)
     return prose
 
 
