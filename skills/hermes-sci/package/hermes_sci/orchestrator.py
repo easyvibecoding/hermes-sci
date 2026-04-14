@@ -48,6 +48,8 @@ def run_pipeline(
     concurrency: Optional[int] = None,
     annotate_unverified_claims: bool = False,
     progress: ProgressCallback = _noop_progress,
+    retry_cfg: Optional[BackendConfig] = None,
+    retry_model: Optional[str] = None,
 ) -> dict:
     """Full: ideate → pick best → writeup → review.
 
@@ -100,7 +102,8 @@ def run_pipeline(
                 critique=critique, coherence=coherence, parallel=parallel,
                 concurrency=concurrency,
                 annotate_unverified_claims=annotate_unverified_claims,
-                progress=progress)
+                progress=progress,
+                retry_cfg=retry_cfg, retry_model=retry_model)
     report["stages"]["writeup"] = w
 
     # Stage 4: review (only if PDF was produced)

@@ -413,15 +413,16 @@ def write_paper(
                 log.info("inserted table labels in %s: %s", k, sorted(after - before))
         cleaned[k] = v2
 
-    # Abstract comes from idea metadata (ideation step), not from the
-    # per-section LLM pass, so it also bypasses the per-section sanitize
-    # pipeline. Run it through explicitly so prose specials like `_` or a
-    # truncated inline equation don't crash pdflatex before \section{} even
-    # starts.
+    # Title + abstract come from idea metadata (ideation step), not from
+    # the per-section LLM pass, so they bypass the SANITIZE_PIPELINE. Run
+    # them through explicitly — otherwise a prose `_` in the title or a
+    # truncated inline equation in the abstract crashes pdflatex before
+    # any \section{} even starts.
+    title = _sanitize_latex(str(idea.get("Title") or "Untitled Research"))
     abstract = _sanitize_latex(str(idea.get("Abstract") or ""))
 
     return Paper(
-        title=str(idea.get("Title") or "Untitled Research"),
+        title=title,
         abstract=abstract,
         sections=cleaned,
     )
@@ -472,10 +473,20 @@ def _run_latex(out_dir: pathlib.Path, pdflatex: str) -> tuple[int, list[str]]:
 
 def _retry_failing_sections(
     cfg: BackendConfig, paper: Paper, errors: list[str], model: Optional[str],
+    retry_cfg: Optional[BackendConfig] = None,
+    retry_model: Optional[str] = None,
 ) -> Paper:
     """Ask the LLM to fix LaTeX of each section given the error list.
     Runs sections in parallel via asyncio.gather — one gather cap saves ~7x
-    vs sequential when all sections need fixing."""
+    vs sequential when all sections need fixing.
+
+    If `retry_cfg` is supplied, uses that backend/model for the fix pass
+    instead of the main one. Intended for swapping to a stronger model on
+    retry (e.g. `claude-opus-4-5` via hybrid) when the main backend is
+    cheap/fast MiniMax. Caller is responsible for probing reachability
+    before handing us a hybrid cfg — we don't swallow connection errors."""
+    fix_cfg = retry_cfg or cfg
+    fix_model = retry_model or model
     err_blob = "\n".join(f"- {e}" for e in errors[:12])
 
     async def _fix_one(key: str, body: str) -> tuple[str, str]:
@@ -486,7 +497,8 @@ def _retry_failing_sections(
             "clean, return it unchanged verbatim."
         )
         try:
-            text = await acomplete(cfg, system=RETRY_SYSTEM, user=user, model=model,
+            text = await acomplete(fix_cfg, system=RETRY_SYSTEM, user=user,
+                                   model=fix_model,
                                    temperature=0.1, max_tokens=2500)
             fixed = _sanitize_latex(text.strip())
             if not fixed or not _looks_like_latex(fixed):
@@ -498,7 +510,7 @@ def _retry_failing_sections(
             log.warning("retry LLM failed for %s: %s", key, e)
             return key, body
 
-    limit = recommended_concurrency(cfg)
+    limit = recommended_concurrency(fix_cfg)
 
     async def _fix_all():
         sem = asyncio.Semaphore(limit)
@@ -569,6 +581,8 @@ def writeup(
     audit: bool = True,
     annotate_unverified_claims: bool = False,
     progress: ProgressCallback = _noop_progress,
+    retry_cfg: Optional[BackendConfig] = None,
+    retry_model: Optional[str] = None,
 ) -> dict:
     """End-to-end: idea → paper.tex → paper.pdf with Phase-2 quality passes.
 
@@ -662,7 +676,9 @@ def writeup(
                                     meta={"duration_s": time.time() - t_c,
                                           "error": str(first_err)}))
             return result
-        fixed = _retry_failing_sections(cfg, paper, errs, model)
+        fixed = _retry_failing_sections(cfg, paper, errs, model,
+                                        retry_cfg=retry_cfg,
+                                        retry_model=retry_model)
         tex2 = render_tex(fixed)
         try:
             pdf = compile_pdf(tex2, out_dir, progress=progress)

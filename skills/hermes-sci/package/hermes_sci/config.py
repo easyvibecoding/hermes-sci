@@ -159,6 +159,26 @@ def resolve_backend(
     raise ValueError(f"Unknown backend: {backend}")
 
 
+def probe_claude_proxy(url: str, timeout_s: float = 1.5) -> bool:
+    """Return True iff GET {url}/health responds {"ok": true} fast enough.
+
+    Intended for CLI `--retry-backend hybrid` where we want to silently
+    fall back to the main backend if the claude proxy isn't running —
+    not every user has delegation wired up, and failing the whole run
+    because of an optional-upgrade path would be hostile.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{url.rstrip('/')}/health",
+                                     timeout=timeout_s) as r:
+            data = json.loads(r.read().decode("utf-8"))
+            return bool(data.get("ok"))
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+        return False
+
+
 def apply_env(cfg: BackendConfig) -> None:
     """Export env so 3rd-party SDKs (openai, anthropic) pick up the config."""
     os.environ["OPENAI_API_KEY"] = cfg.api_key

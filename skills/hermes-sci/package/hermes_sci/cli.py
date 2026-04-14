@@ -14,7 +14,7 @@ import pathlib
 import sys
 from typing import Any, Optional
 
-from .config import Backend, apply_env, resolve_backend
+from .config import Backend, apply_env, probe_claude_proxy, resolve_backend
 from .ideation import ideate as ideate_fn, save_ideas
 from .orchestrator import run_pipeline
 from .progress import _resolve_builtin as _resolve_progress
@@ -45,6 +45,44 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--progress", choices=("human", "jsonl", "off"), default="human",
                    help="stage-level progress sink (default: human)")
     p.add_argument("-v", "--verbose", action="store_true")
+
+
+def _add_retry_common(p: argparse.ArgumentParser) -> None:
+    """Retry-backend knobs for writeup/pipeline only (not ideate/review)."""
+    p.add_argument("--retry-backend", choices=("same", "hybrid"), default="same",
+                   help="backend for log-driven LaTeX retry after pdflatex "
+                        "fails. 'same' (default) reuses --backend; 'hybrid' "
+                        "routes the retry through claude -p for a stronger "
+                        "fix pass. If the claude proxy is unreachable we "
+                        "silently fall back to 'same' — users without "
+                        "delegation keep working.")
+    p.add_argument("--retry-model", default=None,
+                   help="model to use on retry (default: --model, or "
+                        "'claude-opus-4-5' when --retry-backend=hybrid)")
+
+
+def _build_retry_cfg(args, primary_cfg, progress_cb):
+    """Build a retry BackendConfig if opted in + reachable; else return None.
+
+    Emits a progress warning when hybrid was requested but the proxy probe
+    fails, so the user sees WHY the retry is downgrading."""
+    if getattr(args, "retry_backend", "same") != "hybrid":
+        return None, None
+    if not probe_claude_proxy(args.claude_proxy):
+        from .progress import Progress, emit
+        emit(progress_cb, Progress(
+            kind="warning", stage="compile",
+            message=f"--retry-backend=hybrid requested but claude proxy at "
+                    f"{args.claude_proxy} is unreachable — retry will use "
+                    f"the primary backend instead",
+        ))
+        return None, None
+    retry_cfg = resolve_backend(
+        backend="hybrid", model_override=None,
+        claude_proxy_url=args.claude_proxy,
+    )
+    retry_model = args.retry_model or "claude-opus-4-5"
+    return retry_cfg, retry_model
 
 
 def cmd_ideate(args) -> int:
@@ -84,6 +122,7 @@ def cmd_writeup(args) -> int:
         results_arg = pathlib.Path(args.results_md).read_text(encoding="utf-8")
     out = pathlib.Path(args.output)
     progress = _resolve_progress(args.progress)
+    retry_cfg, retry_model = _build_retry_cfg(args, cfg, progress)
     r = writeup_fn(
         cfg, idea=idea, out_dir=out, results=results_arg,
         model=args.model, skip_compile=args.skip_compile,
@@ -93,6 +132,8 @@ def cmd_writeup(args) -> int:
         concurrency=args.concurrency,
         annotate_unverified_claims=args.annotate_unverified,
         progress=progress,
+        retry_cfg=retry_cfg,
+        retry_model=retry_model,
     )
     print(json.dumps(r, indent=2, ensure_ascii=False))
     return 0 if r.get("pdf") or args.skip_compile else 1
@@ -145,6 +186,7 @@ def cmd_pipeline(args) -> int:
     elif args.results_md:
         results_arg = pathlib.Path(args.results_md).read_text(encoding="utf-8")
     progress = _resolve_progress(args.progress)
+    retry_cfg, retry_model = _build_retry_cfg(args, cfg, progress)
     r = run_pipeline(
         cfg, topic=args.topic, out_dir=pathlib.Path(args.output),
         num_ideas=args.num_ideas, results=results_arg,
@@ -158,6 +200,8 @@ def cmd_pipeline(args) -> int:
         concurrency=args.concurrency,
         annotate_unverified_claims=args.annotate_unverified,
         progress=progress,
+        retry_cfg=retry_cfg,
+        retry_model=retry_model,
     )
     print(json.dumps(r, indent=2, ensure_ascii=False))
     return 0 if not r.get("error") else 1
@@ -198,6 +242,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="override concurrency limit (default: auto — 1 during "
                          "MiniMax peak 15:00-17:30 Asia/Shanghai, 7 off-peak)")
     pw.add_argument("-o", "--output", required=True, help="output directory")
+    _add_retry_common(pw)
     pw.set_defaults(func=cmd_writeup)
 
     pv = sub.add_parser("validate-results",
@@ -229,6 +274,7 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--no-parallel", action="store_true")
     pp.add_argument("--concurrency", type=int, default=None)
     pp.add_argument("-o", "--output", required=True, help="output directory")
+    _add_retry_common(pp)
     pp.set_defaults(func=cmd_pipeline)
     return p
 
