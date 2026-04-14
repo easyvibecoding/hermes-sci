@@ -10,10 +10,12 @@ import json
 import logging
 import pathlib
 import statistics
+import time
 from typing import Optional
 
 from .config import BackendConfig
 from .llm import complete_batch, extract_json
+from .progress import Progress, ProgressCallback, emit, noop as _noop_progress
 
 log = logging.getLogger("hermes_sci.review")
 
@@ -72,6 +74,7 @@ def review(
     temperature: float = 0.3,
     model: Optional[str] = None,
     max_chars: int = 60000,
+    progress: ProgressCallback = _noop_progress,
 ) -> dict:
     """Produce an aggregated review dict for a paper (PDF or plain-text path).
 
@@ -88,6 +91,9 @@ def review(
 
     prompt = REVIEW_PROMPT_TMPL.format(paper_text=text)
     log.info("reviewing: ensemble=%d model=%s", ensemble, model or cfg.model)
+    emit(progress, Progress(kind="stage_start", stage="review",
+                            message=f"ensemble={ensemble}"))
+    t0 = time.time()
     completions = complete_batch(
         cfg, system=REVIEW_SYSTEM, user=prompt,
         model=model, temperature=temperature, max_tokens=3000, n=ensemble,
@@ -100,6 +106,9 @@ def review(
             all_reviews.append(parsed)
 
     if not all_reviews:
+        emit(progress, Progress(kind="stage_end", stage="review",
+                                message="no valid reviews parsed",
+                                meta={"duration_s": time.time() - t0}))
         return {"error": "no valid reviews parsed", "raw": completions}
 
     # aggregate
@@ -121,6 +130,11 @@ def review(
     agg["Decision"] = "Accept" if accepts > len(decisions) / 2 else "Reject"
     agg["ensemble_size"] = len(all_reviews)
     agg["all_reviews"] = all_reviews
+    emit(progress, Progress(kind="stage_end", stage="review",
+                            message=f"{agg['Decision']} overall={agg.get('Overall')}",
+                            meta={"duration_s": time.time() - t0,
+                                  "ensemble_size": len(all_reviews),
+                                  "decision": agg["Decision"]}))
     return agg
 
 

@@ -17,6 +17,7 @@ from typing import Optional
 
 from .config import BackendConfig
 from .ideation import ideate, save_ideas, Idea
+from .progress import ProgressCallback, noop as _noop_progress
 from .results import Results
 from .review import review, save_review
 from .writeup import writeup
@@ -46,6 +47,7 @@ def run_pipeline(
     parallel: bool = True,
     concurrency: Optional[int] = None,
     annotate_unverified_claims: bool = False,
+    progress: ProgressCallback = _noop_progress,
 ) -> dict:
     """Full: ideate → pick best → writeup → review.
 
@@ -57,7 +59,8 @@ def run_pipeline(
 
     # Stage 1: ideation
     log.info("stage 1: ideation")
-    ideas = ideate(cfg, mode="open", topic=topic, num_ideas=num_ideas, model=model)
+    ideas = ideate(cfg, mode="open", topic=topic, num_ideas=num_ideas,
+                   model=model, progress=progress)
     if not ideas:
         report["error"] = "ideation produced zero ideas"
         return report
@@ -96,7 +99,8 @@ def run_pipeline(
                 results=results_payload, model=model, skip_compile=skip_compile,
                 critique=critique, coherence=coherence, parallel=parallel,
                 concurrency=concurrency,
-                annotate_unverified_claims=annotate_unverified_claims)
+                annotate_unverified_claims=annotate_unverified_claims,
+                progress=progress)
     report["stages"]["writeup"] = w
 
     # Stage 4: review (only if PDF was produced)
@@ -106,7 +110,8 @@ def run_pipeline(
                  skip_review, bool(pdf_path))
     else:
         log.info("stage 4: review")
-        rev = review(cfg, paper=pdf_path, model=model, ensemble=3)
+        rev = review(cfg, paper=pdf_path, model=model, ensemble=3,
+                     progress=progress)
         save_review(rev, out_dir / "review.json")
         report["stages"]["review"] = {
             "review_json": str(out_dir / "review.json"),

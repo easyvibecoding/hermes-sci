@@ -17,10 +17,12 @@ import dataclasses
 import json
 import logging
 import pathlib
+import time
 from typing import Literal, Optional
 
 from .config import BackendConfig
 from .llm import complete, extract_json
+from .progress import Progress, ProgressCallback, emit, noop as _noop_progress
 
 log = logging.getLogger("hermes_sci.ideation")
 
@@ -125,6 +127,7 @@ def ideate(
     num_ideas: int = 5,
     reflect: bool = True,
     model: Optional[str] = None,
+    progress: ProgressCallback = _noop_progress,
 ) -> list[Idea]:
     """Generate research ideas.
 
@@ -150,12 +153,18 @@ def ideate(
         user = _prompt_workshop(workshop_md, num_ideas, reflect)
 
     log.info("ideating: mode=%s num_ideas=%d model=%s", mode, num_ideas, model or cfg.model)
+    emit(progress, Progress(kind="stage_start", stage="ideate",
+                            message=f"mode={mode} target={num_ideas}"))
+    t0 = time.time()
     text, _ = complete(cfg, system=IDEATION_SYSTEM, user=user, model=model,
                        temperature=0.9, max_tokens=6000)
 
     parsed = extract_json(text)
     if not isinstance(parsed, list):
         log.error("ideation output was not a JSON array; got %s", type(parsed).__name__)
+        emit(progress, Progress(kind="stage_end", stage="ideate",
+                                message="parse failed",
+                                meta={"duration_s": time.time() - t0}))
         return []
 
     ideas: list[Idea] = []
@@ -166,6 +175,10 @@ def ideate(
             ideas.append(Idea.from_dict(d))
         except (TypeError, ValueError) as e:
             log.warning("skipping malformed idea: %s", e)
+    emit(progress, Progress(kind="stage_end", stage="ideate",
+                            message=f"{len(ideas)} ideas",
+                            meta={"duration_s": time.time() - t0,
+                                  "num_ideas": len(ideas)}))
     return ideas
 
 

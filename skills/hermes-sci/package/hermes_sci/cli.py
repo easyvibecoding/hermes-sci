@@ -17,6 +17,7 @@ from typing import Any, Optional
 from .config import Backend, apply_env, resolve_backend
 from .ideation import ideate as ideate_fn, save_ideas
 from .orchestrator import run_pipeline
+from .progress import _resolve_builtin as _resolve_progress
 from .results import (
     ResultsSchemaError,
     load as results_load,
@@ -41,6 +42,8 @@ def _add_common(p: argparse.ArgumentParser) -> None:
                    help="Override resolved model (default: Hermes config)")
     p.add_argument("--claude-proxy", default="http://127.0.0.1:9099",
                    help="URL for the Anthropic-compat claude -p shim (hybrid only)")
+    p.add_argument("--progress", choices=("human", "jsonl", "off"), default="human",
+                   help="stage-level progress sink (default: human)")
     p.add_argument("-v", "--verbose", action="store_true")
 
 
@@ -48,6 +51,7 @@ def cmd_ideate(args) -> int:
     cfg = resolve_backend(backend=args.backend, model_override=args.model,
                           claude_proxy_url=args.claude_proxy)
     apply_env(cfg)
+    progress = _resolve_progress(args.progress)
     ideas = ideate_fn(
         cfg, mode=args.mode,
         topic=args.topic,
@@ -55,6 +59,7 @@ def cmd_ideate(args) -> int:
         num_ideas=args.num_ideas,
         reflect=not args.no_reflect,
         model=args.model,
+        progress=progress,
     )
     out = pathlib.Path(args.output)
     save_ideas(ideas, out)
@@ -78,6 +83,7 @@ def cmd_writeup(args) -> int:
     elif args.results_md:
         results_arg = pathlib.Path(args.results_md).read_text(encoding="utf-8")
     out = pathlib.Path(args.output)
+    progress = _resolve_progress(args.progress)
     r = writeup_fn(
         cfg, idea=idea, out_dir=out, results=results_arg,
         model=args.model, skip_compile=args.skip_compile,
@@ -86,6 +92,7 @@ def cmd_writeup(args) -> int:
         parallel=not args.no_parallel,
         concurrency=args.concurrency,
         annotate_unverified_claims=args.annotate_unverified,
+        progress=progress,
     )
     print(json.dumps(r, indent=2, ensure_ascii=False))
     return 0 if r.get("pdf") or args.skip_compile else 1
@@ -118,8 +125,10 @@ def cmd_review(args) -> int:
     cfg = resolve_backend(backend=args.backend, model_override=args.model,
                           claude_proxy_url=args.claude_proxy)
     apply_env(cfg)
+    progress = _resolve_progress(args.progress)
     r = review_fn(cfg, paper=pathlib.Path(args.paper),
-                  ensemble=args.ensemble, model=args.model)
+                  ensemble=args.ensemble, model=args.model,
+                  progress=progress)
     out = pathlib.Path(args.output or (pathlib.Path(args.paper).with_suffix(".review.json")))
     save_review(r, out)
     print(f"✅ review → {out}  overall={r.get('Overall')} decision={r.get('Decision')}")
@@ -135,6 +144,7 @@ def cmd_pipeline(args) -> int:
         results_arg = results_load(args.results_json)
     elif args.results_md:
         results_arg = pathlib.Path(args.results_md).read_text(encoding="utf-8")
+    progress = _resolve_progress(args.progress)
     r = run_pipeline(
         cfg, topic=args.topic, out_dir=pathlib.Path(args.output),
         num_ideas=args.num_ideas, results=results_arg,
@@ -143,10 +153,11 @@ def cmd_pipeline(args) -> int:
         skip_compile=args.skip_compile,
         model=args.model,
         critique=not args.no_critique,
-        coherence=not args.no_coherence,
+        coherence=args.coherence,
         parallel=not args.no_parallel,
         concurrency=args.concurrency,
         annotate_unverified_claims=args.annotate_unverified,
+        progress=progress,
     )
     print(json.dumps(r, indent=2, ensure_ascii=False))
     return 0 if not r.get("error") else 1

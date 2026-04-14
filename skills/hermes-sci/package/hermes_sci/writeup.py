@@ -21,6 +21,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import time
 from typing import Optional
 
 from jinja2 import Environment, FileSystemLoader
@@ -28,6 +29,7 @@ from jinja2 import Environment, FileSystemLoader
 from .config import BackendConfig
 from .hardware import HardwareProfile, detect as detect_hardware, hint_for_prompt
 from .llm import acomplete, complete, recommended_concurrency, is_minimax_peak
+from .progress import Progress, ProgressCallback, emit, noop as _noop_progress
 from .results import Results, from_dict as results_from_dict, load as results_load
 from .sanitize import sanitize_latex as _sanitize_latex
 from .verify import audit as verify_audit, annotate_unverified
@@ -251,15 +253,32 @@ async def _gen_all_sections(
     cfg: BackendConfig, context: str, model: Optional[str],
     sections: list[str], critique: bool, parallel: bool,
     concurrency: Optional[int] = None,
+    progress: ProgressCallback = _noop_progress,
 ) -> dict[str, str]:
+    total = len(sections)
+    done = {"n": 0}  # mutable counter shared by closures
+
+    def _emit_done(key: str, ok: bool) -> None:
+        done["n"] += 1
+        kind = "item" if ok else "warning"
+        msg = key if ok else f"{key} (failed)"
+        emit(progress, Progress(kind=kind, stage="section",
+                                current=done["n"], total=total, message=msg))
+
     if parallel:
         limit = concurrency or recommended_concurrency(cfg)
-        log.info("async gather concurrency=%d (sections=%d)", limit, len(sections))
+        log.info("async gather concurrency=%d (sections=%d)", limit, total)
         sem = asyncio.Semaphore(limit)
 
         async def gated(key: str) -> tuple[str, str]:
             async with sem:
-                return await _gen_section(cfg, key, context, model, critique)
+                try:
+                    r = await _gen_section(cfg, key, context, model, critique)
+                    _emit_done(key, ok=True)
+                    return r
+                except Exception:
+                    _emit_done(key, ok=False)
+                    raise
 
         tasks = [gated(k) for k in sections]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -267,9 +286,12 @@ async def _gen_all_sections(
         results = []
         for k in sections:
             try:
-                results.append(await _gen_section(cfg, k, context, model, critique))
+                r = await _gen_section(cfg, k, context, model, critique)
+                results.append(r)
+                _emit_done(k, ok=True)
             except Exception as e:  # noqa: BLE001
                 results.append(e)
+                _emit_done(k, ok=False)
     out: dict[str, str] = {}
     for r in results:
         if isinstance(r, Exception):
@@ -323,6 +345,7 @@ def write_paper(
     coherence: bool = False,      # experimental
     parallel: bool = True,
     concurrency: Optional[int] = None,
+    progress: ProgressCallback = _noop_progress,
 ) -> Paper:
     sections = sections or list(SECTION_PROMPTS.keys())
     hw = hw or detect_hardware()
@@ -333,11 +356,16 @@ def write_paper(
              len(sections), parallel, critique, hw.tier, is_minimax_peak())
     raw_sections = asyncio.run(
         _gen_all_sections(cfg, ctx, model, sections, critique, parallel,
-                          concurrency=concurrency)
+                          concurrency=concurrency, progress=progress)
     )
 
     if coherence and len(raw_sections) >= 3:
+        emit(progress, Progress(kind="stage_start", stage="coherence",
+                                message=f"{len(raw_sections)} sections"))
+        t_coh = time.time()
         raw_sections = _coherence_pass(cfg, raw_sections, model)
+        emit(progress, Progress(kind="stage_end", stage="coherence",
+                                meta={"duration_s": time.time() - t_coh}))
 
     # Collect table IDs from Results for label-recovery pass.
     known_table_ids: set[str] = set()
@@ -458,6 +486,7 @@ def _retry_failing_sections(
 def compile_pdf(
     tex_source: str, out_dir: pathlib.Path,
     bib_path: Optional[pathlib.Path] = None,
+    progress: ProgressCallback = _noop_progress,
 ) -> pathlib.Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "paper.tex").write_text(tex_source, encoding="utf-8")
@@ -469,11 +498,19 @@ def compile_pdf(
     if not pdflatex:
         raise RuntimeError("pdflatex not found in PATH; install MacTeX / TeX Live")
 
+    emit(progress, Progress(kind="item", stage="compile",
+                            current=1, total=3, message="pdflatex pass 1"))
     rc, errs = _run_latex(out_dir, pdflatex)
     if shutil.which("bibtex") and (out_dir / "paper.aux").exists():
+        emit(progress, Progress(kind="item", stage="compile",
+                                message="bibtex"))
         subprocess.run(["bibtex", "paper"], cwd=out_dir,
                        capture_output=True, text=True, timeout=60)
+    emit(progress, Progress(kind="item", stage="compile",
+                            current=2, total=3, message="pdflatex pass 2"))
     _run_latex(out_dir, pdflatex)
+    emit(progress, Progress(kind="item", stage="compile",
+                            current=3, total=3, message="pdflatex pass 3"))
     rc, errs = _run_latex(out_dir, pdflatex)
 
     pdf = out_dir / "paper.pdf"
@@ -498,6 +535,7 @@ def writeup(
     concurrency: Optional[int] = None,
     audit: bool = True,
     annotate_unverified_claims: bool = False,
+    progress: ProgressCallback = _noop_progress,
 ) -> dict:
     """End-to-end: idea → paper.tex → paper.pdf with Phase-2 quality passes.
 
@@ -506,18 +544,32 @@ def writeup(
     a verification_report to the output. Set annotate_unverified_claims=True
     to mark unverified numbers in red in the PDF.
     """
+    emit(progress, Progress(kind="stage_start", stage="writeup",
+                            message=idea.get("Title", "")[:80]))
+    t_w = time.time()
     paper = write_paper(
         cfg, idea=idea, results=results, model=model,
         critique=critique, coherence=coherence, parallel=parallel,
-        concurrency=concurrency,
+        concurrency=concurrency, progress=progress,
     )
+    emit(progress, Progress(kind="stage_end", stage="writeup",
+                            message=f"{len(paper.sections)} sections",
+                            meta={"duration_s": time.time() - t_w}))
 
     # Phase 3 audit
     verification = None
     if audit:
+        emit(progress, Progress(kind="stage_start", stage="verify"))
+        t_v = time.time()
         r_for_audit = results if isinstance(results, Results) else None
         report = verify_audit(paper.sections, results=r_for_audit)
         verification = report.to_dict()
+        emit(progress, Progress(
+            kind="stage_end", stage="verify",
+            message=f"{len(report.verified)}/{report.total_claims} claims verified",
+            meta={"duration_s": time.time() - t_v,
+                  "verification_rate": report.verification_rate,
+                  "unverified_count": len(report.unverified)}))
         log.info("verification: %d/%d claims verified (rate=%.2f)",
                  len(report.verified), report.total_claims,
                  report.verification_rate)
@@ -555,22 +607,42 @@ def writeup(
     if skip_compile:
         return result
 
+    emit(progress, Progress(kind="stage_start", stage="compile"))
+    t_c = time.time()
     try:
-        pdf = compile_pdf(tex, out_dir)
+        pdf = compile_pdf(tex, out_dir, progress=progress)
         result["pdf"] = str(pdf)
+        emit(progress, Progress(kind="stage_end", stage="compile",
+                                message=str(pdf),
+                                meta={"duration_s": time.time() - t_c,
+                                      "pdf_path": str(pdf)}))
         return result
     except RuntimeError as first_err:
         log.warning("first compile failed: %s — attempting log-driven retry", first_err)
+        emit(progress, Progress(kind="retry", stage="compile",
+                                message=str(first_err)[:120]))
         errs = _parse_latex_log(out_dir / "paper.log")
         if not errs:
             result["error"] = str(first_err)
+            emit(progress, Progress(kind="stage_end", stage="compile",
+                                    message="failed (no log errors parsable)",
+                                    meta={"duration_s": time.time() - t_c,
+                                          "error": str(first_err)}))
             return result
         fixed = _retry_failing_sections(cfg, paper, errs, model)
         tex2 = render_tex(fixed)
         try:
-            pdf = compile_pdf(tex2, out_dir)
+            pdf = compile_pdf(tex2, out_dir, progress=progress)
             result["pdf"] = str(pdf)
             result["retry"] = {"errors": errs[:8]}
+            emit(progress, Progress(kind="stage_end", stage="compile",
+                                    message=f"recovered after retry ({len(errs)} errors)",
+                                    meta={"duration_s": time.time() - t_c,
+                                          "pdf_path": str(pdf)}))
         except RuntimeError as second_err:
             result["error"] = f"retry also failed: {second_err}"
+            emit(progress, Progress(kind="stage_end", stage="compile",
+                                    message="retry also failed",
+                                    meta={"duration_s": time.time() - t_c,
+                                          "error": str(second_err)}))
         return result
