@@ -116,7 +116,7 @@ def cmd_pipeline(args) -> int:
         skip_compile=args.skip_compile,
         model=args.model,
         critique=not args.no_critique,
-        coherence=args.coherence,
+        coherence=not args.no_coherence,
         parallel=not args.no_parallel,
         concurrency=args.concurrency,
         annotate_unverified_claims=args.annotate_unverified,
@@ -181,7 +181,8 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--skip-review", action="store_true")
     pp.add_argument("--skip-compile", action="store_true")
     pp.add_argument("--no-critique", action="store_true")
-    pp.add_argument("--no-coherence", action="store_true")
+    pp.add_argument("--coherence", action="store_true", default=False,
+                    help="enable experimental global coherence pass (opt-in; may over-rewrite)")
     pp.add_argument("--no-parallel", action="store_true")
     pp.add_argument("--concurrency", type=int, default=None)
     pp.add_argument("-o", "--output", required=True, help="output directory")
