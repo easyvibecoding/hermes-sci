@@ -17,6 +17,15 @@ hermes skills install easyvibecoding/hermes-sci/hermes-sci
   Anti-hallucination numerical-claim audit, Apple Silicon MPS-aware,
   modular sanitize pipeline with rules-as-data YAML.
 
+## Related projects
+
+- [**vibe-sci**](https://github.com/easyvibecoding/vibe-sci) — provider-neutral
+  spin-off of `hermes-sci` that removes the Hermes-runtime coupling. Same
+  ideation → LaTeX writeup → peer-review → anti-hallucination pipeline,
+  but runs against `claude -p` subprocess, any OpenAI-compatible endpoint,
+  or a rule-based fallback. Use `vibe-sci` outside Hermes workflows; use
+  `hermes-sci` (this repo) when you want Hermes Agent to orchestrate.
+
 ## License
 
 Apache-2.0.
